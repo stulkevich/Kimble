@@ -1,0 +1,185 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZKB_INBOUND_RUN_C01
+*&---------------------------------------------------------------------*
+CLASS lcl_report DEFINITION.
+  PUBLIC SECTION.
+    TYPES:
+      gtr_intid   TYPE RANGE OF zkb_interfaces-intid.
+    METHODS:
+      set_parameters
+        IMPORTING
+          ir_intid             TYPE gtr_intid
+          iv_inact             TYPE char1,
+      select_data,
+      process_data,
+      display_list.
+
+  PROTECTED SECTION.
+    TYPES:
+      BEGIN OF lts_interface,
+        intid                  type zkb_interfaces-intid,
+        service_path           type zkb_interfaces-service_path,
+        number_subobj          type zkb_interfaces-number_subobj,
+      END OF lts_interface,
+      ltt_interfaces           TYPE TABLE OF lts_interface.
+    DATA:
+      mt_interfaces            TYPE ltt_interfaces,
+      mt_messages              TYPE TABLE OF zkbs_outbound_run,
+      mr_intid                 TYPE gtr_intid,
+      mv_inact                 TYPE char1.
+
+    METHODS:
+      call_service
+        IMPORTING
+          is_interface         TYPE lts_interface
+        EXPORTING
+          ev_json              TYPE string.
+ENDCLASS.
+
+CLASS lcl_report IMPLEMENTATION.
+  METHOD set_parameters.
+    mr_intid[] = ir_intid[].
+    mv_inact   = iv_inact.
+  ENDMETHOD.
+
+  METHOD select_data.
+    CONSTANTS:
+      lc_direction_inbound   TYPE zkbe_ex_direction VALUE 'I'.
+
+    IF mv_inact IS INITIAL.
+      SELECT intid service_path number_subobj
+        FROM zkb_interfaces
+        INTO TABLE mt_interfaces
+        WHERE intid     IN mr_intid
+          AND direction EQ lc_direction_inbound
+          AND inact     EQ space.
+    ELSE.
+      SELECT intid service_path number_subobj
+        FROM zkb_interfaces
+        INTO TABLE mt_interfaces
+        WHERE intid     IN mr_intid
+          AND direction EQ lc_direction_inbound.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD process_data.
+    DATA:
+      ls_record_key    TYPE zkbs_exchange_key,
+      lo_record        TYPE REF TO zkb_cl_record_inbound,
+      lv_json          TYPE string,
+      ls_message       type zkbs_outbound_run.
+    FIELD-SYMBOLS:
+      <ls_interface>   TYPE lts_interface.
+
+
+    LOOP AT mt_interfaces ASSIGNING <ls_interface>.
+      do.
+        move-CORRESPONDING <ls_interface> to ls_message.
+        call_service(
+          EXPORTING
+            is_interface = <ls_interface>
+          IMPORTING
+            ev_json      = lv_json ).
+        IF lv_json IS NOT INITIAL.
+          "Create Exchange record for received data
+          ls_message-status = icon_okay.
+          ls_record_key-intid = <ls_interface>-intid.
+          lo_record ?= zkb_cl_record=>build_by_id( ls_record_key-intid ).
+          IF lo_record IS BOUND.
+            lo_record->set_key( ). "Create new key (get_next_number)
+            lo_record->set_json( lv_json ).
+            ls_message-msgid = lo_record->ms_key-keyline.
+          ELSE.
+            ls_message-status = icon_led_red.
+          ENDIF.
+          append ls_message to mt_messages.
+        ELSE.
+          ls_message-status = icon_cancel.
+          if sy-index eq 1.
+            append ls_message to mt_messages.
+          endif.
+          exit.
+        ENDIF.
+      enddo.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD display_list.
+    DATA:
+      lo_salv      TYPE REF TO cl_salv_table,
+      lo_functions TYPE REF TO cl_salv_functions,
+      lo_columns   TYPE REF TO cl_salv_columns_table,
+      lo_column    TYPE REF TO cl_salv_column.
+
+    TRY .
+      cl_salv_table=>factory(
+        IMPORTING
+          r_salv_table   = lo_salv
+        CHANGING
+          t_table        = mt_messages ).
+    CATCH cx_salv_msg.
+      EXIT.
+    ENDTRY.
+
+    lo_functions = lo_salv->get_functions( ).
+    lo_functions->set_all( abap_true ).
+
+*    lo_columns = lo_salv->get_columns( ).
+*
+*    lo_column = lo_columns->get_column( 'SERVICE_PATH' ).
+*    lo_column->set_technical( abap_true ).
+*
+*    lo_column = lo_columns->get_column( 'NUMBER_SUBOBJ' ).
+*    lo_column->set_technical( abap_true ).
+
+    lo_salv->display( ).
+  ENDMETHOD.
+
+  METHOD call_service.
+    DATA:
+      lo_inbound_ws     TYPE REF TO zkb_cl_service_inbound,
+      lref_data         TYPE REF TO data.
+
+*************************************************************
+*    if is_interface-intid eq 'IFO03'.
+*      concatenate
+*        '[ {'
+*        '  "ResourceId" : "IntTest02",'
+*        '  "AssignmentStartDate" : "2018-12-01",'
+*        '  "AssignmentEndDate" : "2019-01-31",'
+*        '  "SapWbsReference" : "K-123456-001",'
+*        '  "ElementReference" : "E000003-001",'
+*        '  "Author" : "sysadmin@kimbleapps.com",'
+*        '  "Action" : "CHG",'
+*        '  "SFID" : "a131j00000034OmAAI"'
+*        '}, {'
+*        '  "ResourceId" : "IntTest01",'
+*        '  "AssignmentStartDate" : "2018-12-01",'
+*        '  "AssignmentEndDate" : "2019-01-31",'
+*        '  "SapWbsReference" : "K-123456-001",'
+*        '  "ElementReference" : "E000003-001",'
+*        '  "Author" : "sysadmin@kimbleapps.com",'
+*        '  "Action" : "CHG",'
+*        '  "SFID" : "a131j00000034OhAAI"'
+*        '} ]'
+*        into ev_json.
+*      return.
+*    endif.
+*************************************************************
+
+    CREATE OBJECT lo_inbound_ws
+      EXPORTING
+        iv_service_path = is_interface-service_path.
+
+    CLEAR ev_json.
+    GET REFERENCE OF ev_json INTO lref_data.
+    TRY.
+        lo_inbound_ws->send_request(
+          CHANGING
+            cref_response_data = lref_data ).
+      CATCH zcx_kb_ws_error.
+        CLEAR ev_json.
+    ENDTRY.
+  ENDMETHOD.
+
+ENDCLASS.
