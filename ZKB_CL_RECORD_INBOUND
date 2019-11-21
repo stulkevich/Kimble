@@ -1,0 +1,220 @@
+class ZKB_CL_RECORD_INBOUND definition
+  public
+  inheriting from ZKB_CL_RECORD
+  create public .
+
+public section.
+
+  data MS_KEY type ZKBS_EXCHANGE_KEY read-only .
+
+  methods SET_JSON
+    importing
+      value(IV_JSON) type STRING .
+  methods GET_JSON
+    returning
+      value(RV_JSON) type STRING .
+  methods SET_KEY
+    importing
+      !IV_KEYLINE type ZKBE_EX_GENERIC_KEY optional .
+  methods SET_PROCESSED
+    importing
+      !IV_KEYLINE type ZKBE_EX_GENERIC_KEY .
+protected section.
+
+  constants GC_JSON_LANGUAGE type SPRAS value 'E'. "#EC NOTEXT
+  constants GC_JSON_TDID type TDID value 'ZKBE'. "#EC NOTEXT
+  constants GC_JSON_TDOBJECT type TDOBJECT value 'ZKBE'. "#EC NOTEXT
+private section.
+ENDCLASS.
+
+
+
+CLASS ZKB_CL_RECORD_INBOUND IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_INBOUND->GET_JSON
+* +-------------------------------------------------------------------------------------------------+
+* | [<-()] RV_JSON                        TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+method GET_JSON.
+  DATA:
+    ls_header         TYPE thead,
+    lt_line           TYPE tline_t,
+    lv_number_subobj  TYPE zkb_interfaces-number_subobj.
+  FIELD-SYMBOLS:
+    <ls_line>         TYPE tline.
+
+  clear rv_json.
+
+  "Set text header
+  CHECK ms_key-intid IS NOT INITIAL AND ms_key-keyline IS NOT INITIAL.
+
+  SELECT SINGLE number_subobj
+    FROM zkb_interfaces
+    INTO lv_number_subobj
+    WHERE intid EQ ms_key-intid.
+
+  CHECK sy-subrc EQ 0 AND lv_number_subobj IS NOT INITIAL.
+
+  ls_header-tdname   = lv_number_subobj.
+  ls_header-tdname+6 = ms_key-keyline.
+
+  refresh lt_line.
+  CALL FUNCTION 'READ_TEXT'
+    EXPORTING
+      id                            = gc_json_tdid
+      language                      = gc_json_language
+      NAME                          = ls_header-tdname
+      OBJECT                        = gc_json_tdobject
+    TABLES
+      lines                         = lt_line
+    EXCEPTIONS
+      ID                            = 1
+      LANGUAGE                      = 2
+      NAME                          = 3
+      NOT_FOUND                     = 4
+      OBJECT                        = 5
+      REFERENCE_CHECK               = 6
+      WRONG_ACCESS_TO_ARCHIVE       = 7
+      OTHERS                        = 8.
+
+  IF sy-subrc eq 0.
+    LOOP AT lt_line ASSIGNING <ls_line>.
+      concatenate rv_json <ls_line>-TDLINE into rv_json.
+    ENDLOOP.
+  ENDIF.
+endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_INBOUND->SET_JSON
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_JSON                        TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD SET_JSON.
+  DATA:
+    ls_header         TYPE thead,
+    lt_line           TYPE tline_t,
+    lv_number_subobj  TYPE zkb_interfaces-number_subobj.
+  FIELD-SYMBOLS:
+    <ls_line>         TYPE tline.
+
+  CHECK iv_json IS NOT INITIAL.
+
+  "Set text header
+  CHECK ms_key-intid IS NOT INITIAL AND ms_key-keyline IS NOT INITIAL.
+
+  SELECT SINGLE number_subobj
+    FROM zkb_interfaces
+    INTO lv_number_subobj
+    WHERE intid EQ ms_key-intid.
+
+  CHECK sy-subrc EQ 0 AND lv_number_subobj IS NOT INITIAL.
+
+  ls_header-tdobject = gc_json_tdobject.
+  ls_header-tdname   = lv_number_subobj.
+  ls_header-tdname+6 = ms_key-keyline.
+  ls_header-tdid     = gc_json_tdid.
+  ls_header-tdspras  = gc_json_language.
+
+  "Set text body (condensing spaces!)
+  DO.
+    APPEND INITIAL LINE TO lt_line ASSIGNING <ls_line>.
+    IF strlen( iv_json ) GE 130.
+      <ls_line>-tdline = iv_json(130).
+      iv_json = iv_json+130.
+    ELSE.
+      <ls_line>-tdline = iv_json.
+      CLEAR iv_json.
+    ENDIF.
+    IF iv_json IS INITIAL.
+      EXIT.
+    ENDIF.
+  ENDDO.
+
+  CALL FUNCTION 'SAVE_TEXT'
+    EXPORTING
+      header                = ls_header
+    TABLES
+      lines                 = lt_line
+    EXCEPTIONS
+      id                    = 1
+      language              = 2
+      name                  = 3
+      object                = 4
+      OTHERS                = 5.
+
+  if sy-subrc eq 0.
+    COMMIT WORK.
+  endif.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_INBOUND->SET_KEY
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_KEYLINE                     TYPE        ZKBE_EX_GENERIC_KEY(optional)
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD SET_KEY.
+  DATA:
+    lv_subobj     TYPE zkb_interfaces-number_subobj,
+    lv_newkey     TYPE zkbe_inbmsg_id.
+
+  ms_key-intid = ms_interface-intid.
+  IF iv_keyline IS INITIAL.
+    SELECT SINGLE number_subobj
+      FROM zkb_interfaces
+      INTO lv_subobj
+      WHERE intid EQ ms_key-intid.
+    IF sy-subrc EQ 0 AND lv_subobj IS NOT INITIAL.
+      CALL FUNCTION 'NUMBER_GET_NEXT'
+        EXPORTING
+          nr_range_nr                   = '00'
+          object                        = 'ZKB_INBMSG'
+          subobject                     = lv_subobj
+        IMPORTING
+          number                        = lv_newkey
+*          RETURNCODE                    =
+        EXCEPTIONS
+          interval_not_found            = 1
+          number_range_not_intern       = 2
+          object_not_found              = 3
+          quantity_is_0                 = 4
+          quantity_is_not_1             = 5
+          interval_overflow             = 6
+          buffer_overflow               = 7
+          OTHERS                        = 8.
+      IF sy-subrc EQ 0 AND lv_newkey IS NOT INITIAL.
+        ms_key-keyline = lv_newkey.
+
+        IF enqueue_line( ms_key-keyline ) EQ abap_true.
+          me->update_status(
+            EXPORTING
+              iv_status  = gc_statuses-created
+              iv_keyline = ms_key-keyline
+          ).
+          dequeue_line( ms_key-keyline ).
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ELSE.
+    ms_key-keyline = iv_keyline.
+  ENDIF.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_INBOUND->SET_PROCESSED
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_KEYLINE                     TYPE        ZKBE_EX_GENERIC_KEY
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD set_processed.
+  update_status(
+    EXPORTING
+      iv_status  = gc_statuses-processed
+      iv_keyline = iv_keyline ).
+ENDMETHOD.
+ENDCLASS.
