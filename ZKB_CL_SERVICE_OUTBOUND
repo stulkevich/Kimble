@@ -1,0 +1,53 @@
+class ZKB_CL_SERVICE_OUTBOUND definition
+  public
+  inheriting from ZKB_CL_SERVICE
+  final
+  create public .
+
+public section.
+
+  methods CONSTRUCTOR
+    importing
+      !IV_SERVICE_PATH type ZKBE_SERVICE_PATH default '' .
+protected section.
+
+  methods GET_JSON_FROM_INPUT
+    redefinition .
+private section.
+ENDCLASS.
+
+
+
+CLASS ZKB_CL_SERVICE_OUTBOUND IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_SERVICE_OUTBOUND->CONSTRUCTOR
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SERVICE_PATH                TYPE        ZKBE_SERVICE_PATH (default ='')
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+method CONSTRUCTOR.
+  super->constructor( ).
+
+  IF iv_service_path IS NOT INITIAL.
+    mv_path_service = iv_service_path.
+    mv_request_method = if_http_entity=>co_request_method_post.
+  ENDIF.
+endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_SERVICE_OUTBOUND->GET_JSON_FROM_INPUT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IREF_DATA                      TYPE REF TO DATA
+* | [<-()] RV_JSON_STRING                 TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD GET_JSON_FROM_INPUT.
+  FIELD-SYMBOLS:
+    <lv_json>    TYPE string.
+
+  CHECK iref_data IS BOUND.
+  ASSIGN iref_data->* TO <lv_json>.
+  rv_json_string = <lv_json>.
+ENDMETHOD.
+ENDCLASS.
