@@ -1,0 +1,7 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZKB_INBOUND_RUN_S01
+*&---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK bl01 WITH FRAME TITLE text-001.
+  SELECT-OPTIONS:
+    s_key  FOR zkb_exchange-keyline.
+SELECTION-SCREEN END OF BLOCK bl01.
