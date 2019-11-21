@@ -1,0 +1,31 @@
+*&--------------------------------------------------------------------*
+*& Report  ZKB_INBOUND_RUN
+*---------------------------------------------------------------------*
+*Developer Name     : Ivan Stulkevich                                 *
+*Date of development: 16.01.2019                                      *
+*Short description  : Call "Inbound" interfaces                       *
+*Project/Ticket     : KIMBLE Integration                              *
+*---------------------------------------------------------------------*
+*Changes List                                                         *
+*-----------+----------+---------------------------------------+------*
+*Author Name|Date      |TR & Description                       | TAG  *
+*-----------+----------+---------------------------------------+------*
+*           |          |                                       |      *
+*-----------+----------+---------------------------------------+------*
+REPORT  zkb_inbound_run.
+
+INCLUDE zkb_inbound_run_c01.    "Main class
+INCLUDE zkb_inbound_run_top.    "Types and global variables
+INCLUDE zkb_inbound_run_s01.    "Selection screen
+
+START-OF-SELECTION.
+  INCLUDE zbc_zwrw_update.
+  CREATE OBJECT go_report.
+  go_report->set_parameters(
+    EXPORTING
+      ir_intid = s_intid[]
+      iv_inact = p_inact ).
+  go_report->select_data( ).
+  go_report->process_data( ).
+  go_report->display_list( ).
+  FREE go_report.
