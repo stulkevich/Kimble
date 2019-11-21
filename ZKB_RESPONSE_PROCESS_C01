@@ -1,0 +1,96 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZKB_INBOUND_RUN_C01
+*&---------------------------------------------------------------------*
+CLASS lcl_report DEFINITION.
+  PUBLIC SECTION.
+    TYPES:
+      gtr_key                  TYPE RANGE OF zkb_exchange-keyline.
+    CONSTANTS:
+      gc_response_intid        TYPE zkbe_ex_intid VALUE 'IFO06'.
+    METHODS:
+      set_parameters
+        IMPORTING
+          ir_key               TYPE gtr_key,
+      process_data.
+  PROTECTED SECTION.
+    DATA:
+      mr_key                   TYPE gtr_key.
+ENDCLASS.
+
+CLASS lcl_report IMPLEMENTATION.
+  METHOD set_parameters.
+    mr_key[] = ir_key[].
+  ENDMETHOD.
+
+
+  METHOD process_data.
+    DATA:
+      lt_messages     TYPE TABLE OF zkbe_ex_generic_key,
+      lt_responses    TYPE TABLE OF zkbs_input_if06,
+      lv_cnt          TYPE sytabix,
+      lt_send_log     TYPE TABLE OF zkb_send_log,
+      lo_response_rec TYPE REF TO zkb_cl_record_inbound.
+    FIELD-SYMBOLS:
+      <lv_keyline>    TYPE zkbe_ex_generic_key,
+      <ls_response>   TYPE zkbs_input_if06,
+      <ls_send_log>   TYPE zkb_send_log.
+
+    IF mr_key[] IS INITIAL.
+      SELECT keyline
+        FROM zkb_exchange
+        INTO TABLE lt_messages
+        WHERE intid   EQ gc_response_intid
+          AND status  EQ zkb_cl_record=>gc_statuses-created.
+    ELSE.
+      SELECT keyline
+        FROM zkb_exchange
+        INTO TABLE lt_messages
+        WHERE intid   EQ gc_response_intid
+          AND keyline IN mr_key.
+    ENDIF.
+    IF lt_messages[] IS INITIAL.
+      WRITE: / 'No unprocessed response records found'.
+      "Run ZKB_INBOUND_RUN report to get more if necessary
+    ENDIF.
+
+    LOOP AT lt_messages ASSIGNING <lv_keyline>.
+      WRITE: / 'Key:', <lv_keyline>.
+      REFRESH lt_responses.
+      CALL FUNCTION 'ZKB_GET_INBOUND_DATA'
+        EXPORTING
+          iv_intid         = gc_response_intid
+          iv_keyline       = <lv_keyline>
+        TABLES
+          et_data          = lt_responses.
+      lv_cnt = lines( lt_responses[] ).
+      IF lv_cnt IS NOT INITIAL.
+        lo_response_rec ?= zkb_cl_record_inbound=>build_by_id( gc_response_intid ).
+        lo_response_rec->set_processed( <lv_keyline> ).
+      ENDIF.
+      WRITE: 'Records count', lv_cnt.
+      LOOP AT lt_responses ASSIGNING <ls_response>.
+        APPEND INITIAL LINE TO lt_send_log ASSIGNING <ls_send_log>.
+        <ls_send_log>-send_guid = <ls_response>-externalrequestid.
+        CASE <ls_response>-runlinestatus.
+          WHEN 'Ready'.
+            <ls_send_log>-msgty = 'W'.
+          WHEN 'Ignored'.
+            <ls_send_log>-msgty = 'E'. "or 'A'? well, technically it's an Error. No real difference from 'E'.
+          WHEN 'Completed'.
+            <ls_send_log>-msgty = 'S'.
+          WHEN OTHERS.
+            <ls_send_log>-msgty = 'E'.
+        ENDCASE.
+        <ls_send_log>-message_text = <ls_response>-interfacerunlineerrormessage.
+
+        UPDATE zkb_send_log
+           SET msgty = <ls_send_log>-msgty
+               message_text = <ls_response>-interfacerunlineerrormessage
+         WHERE send_guid = <ls_send_log>-send_guid.
+      ENDLOOP.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+ENDCLASS.
