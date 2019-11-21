@@ -1,0 +1,130 @@
+class ZKB_CL_RECORD_OUTBOUND_IFI04 definition
+  public
+  inheriting from ZKB_CL_RECORD_OUTBOUND
+  final
+  create public .
+
+public section.
+
+  types GTS_LINE_TO_SEND type ZKBS_OUTPUT_IF04 .
+  types GTS_RECORD_LINE type ZKBS_RECORD_IF04 .
+  types:
+    GTT_TABLE_TO_SEND type TABLE OF GTS_LINE_TO_SEND .
+
+  type-pools ABAP .
+  methods ADD_LINE
+    importing
+      !IS_LINE type ANY
+    returning
+      value(RV_SUCCESS) type ABAP_BOOL .
+  methods CONSTRUCTOR .
+protected section.
+
+  type-pools ABAP .
+  data MV_UPDATE_STATUS type ABAP_BOOL value ABAP_FALSE. "#EC NOTEXT .
+
+  methods SET_RESULT_STATUSES
+    redefinition .
+private section.
+
+  data MT_DATA type GTT_TABLE_TO_SEND .
+ENDCLASS.
+
+
+
+CLASS ZKB_CL_RECORD_OUTBOUND_IFI04 IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_OUTBOUND_IFI04->ADD_LINE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IS_LINE                        TYPE        ANY
+* | [<-()] RV_SUCCESS                     TYPE        ABAP_BOOL
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD add_line.
+  DATA:
+    lv_keyline  TYPE zkb_exchange-keyline,
+    lv_status   TYPE zkb_exchange-status,
+    ls_line     TYPE GTS_RECORD_LINE.
+  FIELD-SYMBOLS:
+    <ls_data>   TYPE GTS_LINE_TO_SEND.
+
+  MOVE-CORRESPONDING is_line TO ls_line.
+
+  rv_success = abap_true.
+
+  lv_keyline = ls_line-counter.
+  SELECT SINGLE status
+    FROM zkb_exchange
+    INTO lv_status
+    WHERE intid   EQ ms_interface-intid
+      AND keyline EQ lv_keyline.
+  IF sy-subrc NE 0.
+    update_status(
+      EXPORTING
+        iv_status  = gc_statuses-created
+        iv_keyline = lv_keyline ).
+  ELSEIF lv_status EQ gc_statuses-processed.
+    "Already sent
+    CLEAR rv_success.
+    RETURN.
+  ENDIF.
+
+  APPEND INITIAL LINE TO mt_data ASSIGNING <ls_data>.
+  <ls_data>-sapwbsreference      = ls_line-rproj.
+  <ls_data>-resource             = ls_line-pernr.
+  WRITE ls_line-catshours TO <ls_data>-hours.
+  WRITE ls_line-workdate TO <ls_data>-entrydate DD/MM/YYYY.
+  <ls_data>-timeentryuniqueextid = ls_line-counter.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_OUTBOUND_IFI04->CONSTRUCTOR
+* +-------------------------------------------------------------------------------------------------+
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD constructor.
+  super->constructor( ).
+  REFRESH mt_data.
+  GET REFERENCE OF mt_data INTO mref_data.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD_OUTBOUND_IFI04->SET_RESULT_STATUSES
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_SUCCESSFUL                  TYPE        GTT_TABIX
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD set_result_statuses.
+  super->set_result_statuses( it_successful ).
+
+  DATA:
+    lv_keyline      TYPE zkb_exchange-keyline.
+  FIELD-SYMBOLS:
+    <lt_data>       TYPE zkb_cl_record_outbound_ifi04=>gtt_table_to_send,
+    <ls_data>       TYPE zkb_cl_record_outbound_ifi04=>gts_line_to_send,
+    <lv_index>      TYPE sytabix.
+
+  CHECK mv_update_status EQ abap_true.
+
+  CHECK mref_data IS BOUND.
+  ASSIGN mref_data->* TO <lt_data>.
+  CHECK <lt_data> IS ASSIGNED.
+  LOOP AT <lt_data> ASSIGNING <ls_data>.
+    READ TABLE it_successful ASSIGNING <lv_index> WITH KEY table_line = sy-tabix.
+    lv_keyline = <ls_data>-timeentryuniqueextid.
+    IF sy-subrc EQ 0.
+      update_status(
+        EXPORTING
+          iv_status  = gc_statuses-processed
+          iv_keyline = lv_keyline ).
+    ELSE.
+      update_status(
+        EXPORTING
+          iv_status  = gc_statuses-errors
+          iv_keyline = lv_keyline ).
+    ENDIF.
+  ENDLOOP.
+
+ENDMETHOD.
+ENDCLASS.
