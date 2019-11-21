@@ -1,0 +1,361 @@
+class ZKB_CL_RECORD_OUTBOUND definition
+  public
+  inheriting from ZKB_CL_RECORD
+  create public .
+
+public section.
+
+  methods SET_DATA
+    importing
+      !IREF_DATA type ref to DATA .
+  methods SEND_BY_PACKAGE
+    importing
+      !IREF_RESULT type ref to DATA optional .
+protected section.
+
+  types:
+    GTT_TABIX TYPE TABLE OF sytabix .
+
+  data MV_PACKAGE_MAX_ELEMENTS type SYTABIX value 100. "#EC NOTEXT .
+  data MV_PACKAGE_MAX_SYMBOLS type INT4 value 1048576. "#EC NOTEXT .
+
+  methods FORM_JSON_FOR_ELEMENT
+    importing
+      !IREF_DATA type ref to DATA
+    returning
+      value(RV_JSON) type STRING .
+  methods SAVE_SEND_LOG
+    importing
+      !IT_PACKAGE_LINES type GTT_TABIX
+      !IV_PACKAGE_ID type ZKBE_PACKAGE_ID .
+  methods BUILD_RESULT_TAB
+    importing
+      !IREF_RESULT type ref to DATA
+      !IT_SUCCESSFUL type GTT_TABIX .
+  methods SET_RESULT_STATUSES
+    importing
+      !IT_SUCCESSFUL type GTT_TABIX .
+private section.
+
+  methods SEND_PACKAGE
+    importing
+      !IV_JSON type STRING
+    returning
+      value(RV_PACKAGE_ID) type ZKBE_PACKAGE_ID .
+  methods GET_LINE_GUID
+    importing
+      !IS_LINE type ANY
+    returning
+      value(RV_SEND_GUID) type ZKBE_SEND_GUID .
+  methods SET_LINE_GUID
+    changing
+      !CS_LINE type ANY .
+  methods GET_PACKAGE_ID_FROM_RESPONSE
+    importing
+      !IV_RESPONSE type STRING
+    returning
+      value(RV_PACKAGE_ID) type ZKBE_PACKAGE_ID .
+ENDCLASS.
+
+
+
+CLASS ZKB_CL_RECORD_OUTBOUND IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD_OUTBOUND->BUILD_RESULT_TAB
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IREF_RESULT                    TYPE REF TO DATA
+* | [--->] IT_SUCCESSFUL                  TYPE        GTT_TABIX
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD BUILD_RESULT_TAB.
+  FIELD-SYMBOLS:
+    <lt_data>       TYPE STANDARD TABLE,
+    <lt_data_res>   TYPE STANDARD TABLE,
+    <lv_index>      TYPE sytabix,
+    <ls_line>       TYPE any.
+
+  CHECK mref_data IS BOUND.
+  CHECK iref_result IS BOUND.
+  ASSIGN mref_data->* TO <lt_data>.
+  ASSIGN iref_result->* TO <lt_data_res>.
+  CHECK <lt_data> IS ASSIGNED AND <lt_data_res> IS ASSIGNED.
+  LOOP AT it_successful ASSIGNING <lv_index>.
+    READ TABLE <lt_data> INDEX <lv_index> ASSIGNING <ls_line>.
+    APPEND <ls_line> TO <lt_data_res>.
+  ENDLOOP.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD_OUTBOUND->FORM_JSON_FOR_ELEMENT
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IREF_DATA                      TYPE REF TO DATA
+* | [<-()] RV_JSON                        TYPE        STRING
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD form_json_for_element.
+  DATA:
+    lo_json_parser    TYPE REF TO zkb_cl_gis_json_parser,
+    lt_transformation TYPE gis_transformation_tty.
+  FIELD-SYMBOLS:
+    <ls_any>          TYPE any,
+    <ls_transform>    TYPE transformation_sty.
+
+  IF gt_fields[] IS INITIAL.
+    load_field_mapping( ).
+  ENDIF.
+
+  CLEAR rv_json.
+
+  CHECK iref_data IS BOUND.
+  ASSIGN iref_data->* TO <ls_any>.
+  CHECK sy-subrc EQ 0.
+
+*  REFRESH lt_transformation.
+*  APPEND INITIAL LINE TO lt_transformation ASSIGNING <ls_transform>.
+*  <ls_transform>-COMP_PATH  = ''.
+*  <ls_transform>-TRANS_NAME = ''.
+
+  CREATE OBJECT lo_json_parser.
+  TRY.
+      lo_json_parser->zkb_if_gis_parser~serialize(
+        EXPORTING
+          abap_data      = <ls_any>
+          transformation = gt_fields "lt_transformation
+        RECEIVING
+          result         = rv_json  ).
+    CATCH cx_root.
+  ENDTRY.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZKB_CL_RECORD_OUTBOUND->GET_LINE_GUID
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IS_LINE                        TYPE        ANY
+* | [<-()] RV_SEND_GUID                   TYPE        ZKBE_SEND_GUID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD get_line_guid.
+  TYPES:
+    BEGIN OF lts_guid,
+      send_guid   TYPE zkbe_send_guid,
+    END OF lts_guid.
+  DATA:
+    ls_guid  TYPE lts_guid.
+
+  MOVE-CORRESPONDING is_line TO ls_guid.
+  rv_send_guid = ls_guid-send_guid.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZKB_CL_RECORD_OUTBOUND->GET_PACKAGE_ID_FROM_RESPONSE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_RESPONSE                    TYPE        STRING
+* | [<-()] RV_PACKAGE_ID                  TYPE        ZKBE_PACKAGE_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD get_package_id_from_response.
+  CONSTANTS:
+    lc_not_found   TYPE i VALUE '-1',
+    lc_min_lenght  TYPE i VALUE 12.
+
+  "Kimble can respond with an error line (simple text) or with an Interface Run ID.
+  "There is no clear sign which of the above situations we've got.
+  "Assuming Interface Run ID can't have spaces or special characters and also has additional signs
+  "as a minimum length for example, we'll try to figure out:
+
+  CLEAR rv_package_id.
+
+  CHECK iv_response IS NOT INITIAL.
+  CHECK strlen( iv_response ) GE lc_min_lenght.
+  CHECK find( val = iv_response regex = '[^A-Za-z0-9]' ) EQ lc_not_found.
+
+  rv_package_id = iv_response.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD_OUTBOUND->SAVE_SEND_LOG
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_PACKAGE_LINES               TYPE        GTT_TABIX
+* | [--->] IV_PACKAGE_ID                  TYPE        ZKBE_PACKAGE_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD save_send_log.
+  DATA:
+    lt_send_log     TYPE TABLE OF zkb_send_log.
+  FIELD-SYMBOLS:
+    <lt_data>       TYPE STANDARD TABLE,
+    <lv_index>      TYPE sytabix,
+    <ls_line>       TYPE any,
+    <ls_send_log>   TYPE zkb_send_log.
+
+  CHECK mref_data IS BOUND.
+  ASSIGN mref_data->* TO <lt_data>.
+  CHECK <lt_data> IS ASSIGNED.
+
+  REFRESH lt_send_log.
+  LOOP AT it_package_lines ASSIGNING <lv_index>.
+    READ TABLE <lt_data> INDEX <lv_index> ASSIGNING <ls_line>.
+    APPEND INITIAL LINE TO lt_send_log ASSIGNING <ls_send_log>.
+    <ls_send_log>-send_guid = get_line_guid( <ls_line> ).
+    <ls_send_log>-package_id = iv_package_id.
+    <ls_send_log>-crdat = sy-datum.
+    <ls_send_log>-crtim = sy-uzeit.
+    <ls_send_log>-crnam = sy-uname.
+  ENDLOOP.
+
+  IF lt_send_log[] IS NOT INITIAL.
+    INSERT zkb_send_log FROM TABLE lt_send_log.
+    IF sy-subrc EQ 0.
+      COMMIT WORK.
+    ELSE.
+      ROLLBACK WORK.
+    ENDIF.
+  ENDIF.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_OUTBOUND->SEND_BY_PACKAGE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IREF_RESULT                    TYPE REF TO DATA(optional)
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD send_by_package.
+  DATA:
+    lv_elements   TYPE syindex,
+    lv_json_full  TYPE string,
+    lv_json_part  TYPE string,
+    lref_data     TYPE REF TO data,
+    lt_package    TYPE gtt_tabix,
+    lt_successful TYPE gtt_tabix,
+    lv_package_id TYPE zkbe_package_id.
+  FIELD-SYMBOLS:
+    <ls_tabix>    TYPE sytabix,
+    <lt_data>     TYPE ANY TABLE,
+    <ls_line>     TYPE any.
+
+  CHECK mref_data IS BOUND.
+  ASSIGN mref_data->* TO <lt_data>.
+  CLEAR lv_elements.
+  REFRESH lt_package.
+  LOOP AT <lt_data> ASSIGNING <ls_line>.
+    set_line_guid( CHANGING cs_line = <ls_line> ).
+
+    APPEND sy-tabix TO lt_package ASSIGNING <ls_tabix>.
+    ADD 1 TO lv_elements.
+    GET REFERENCE OF <ls_line> INTO lref_data.
+    lv_json_part = form_json_for_element( lref_data ).
+    IF lv_json_part IS NOT INITIAL.
+      IF lv_elements EQ 1.
+        CONCATENATE '[' lv_json_part INTO lv_json_full.
+      ELSE.
+        CONCATENATE ',' lv_json_part INTO lv_json_part SEPARATED BY space.
+        CONCATENATE lv_json_full lv_json_part INTO lv_json_full.
+      ENDIF.
+    ENDIF.
+    IF strlen( lv_json_full ) GT mv_package_max_symbols OR lv_elements GT mv_package_max_elements OR <ls_tabix> EQ lines( <lt_data> ).
+      CONCATENATE lv_json_full ']' INTO lv_json_full.
+      lv_package_id = send_package( lv_json_full ).
+      IF lv_package_id IS NOT INITIAL.
+        APPEND LINES OF lt_package TO lt_successful.
+        save_send_log(
+            it_package_lines = lt_package
+            iv_package_id    = lv_package_id ).
+      ENDIF.
+      CLEAR lv_json_full.
+      CLEAR lv_elements.
+      REFRESH lt_package.
+    ENDIF.
+  ENDLOOP.
+
+  IF iref_result IS SUPPLIED.
+    build_result_tab(
+      EXPORTING
+        iref_result   = iref_result
+        it_successful = lt_successful ).
+  ENDIF.
+
+  set_result_statuses( lt_successful ).
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZKB_CL_RECORD_OUTBOUND->SEND_PACKAGE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_JSON                        TYPE        STRING
+* | [<-()] RV_PACKAGE_ID                  TYPE        ZKBE_PACKAGE_ID
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD send_package.
+  DATA:
+    lo_outbound_ws    TYPE REF TO zkb_cl_service_outbound,
+    lref_data         TYPE REF TO data,
+    lv_response       TYPE string.
+
+  CLEAR rv_package_id.
+  CHECK ms_interface-inact IS INITIAL. "Don't send for inactive interfaces
+
+  CREATE OBJECT lo_outbound_ws
+    EXPORTING
+      iv_service_path = me->ms_interface-service_path.
+
+  GET REFERENCE OF iv_json INTO lref_data.
+  TRY.
+      lo_outbound_ws->send_request(
+        EXPORTING
+          iref_request_data  = lref_data
+        IMPORTING
+          ev_response_text   = lv_response ).
+      rv_package_id = get_package_id_from_response( lv_response ).
+    CATCH zcx_kb_ws_error_token_expired.    " Token expired
+    CATCH zcx_kb_ws_error.    " Salesforce Web Service exception
+  ENDTRY.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_RECORD_OUTBOUND->SET_DATA
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IREF_DATA                      TYPE REF TO DATA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+method SET_DATA.
+  mref_data = iref_data.
+endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Private Method ZKB_CL_RECORD_OUTBOUND->SET_LINE_GUID
+* +-------------------------------------------------------------------------------------------------+
+* | [<-->] CS_LINE                        TYPE        ANY
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD set_line_guid.
+  TYPES:
+    BEGIN OF lts_guid,
+      send_guid   TYPE zkbe_send_guid,
+    END OF lts_guid.
+  DATA:
+    ls_guid  TYPE lts_guid.
+
+  CLEAR ls_guid-send_guid.
+  TRY.
+    ls_guid-send_guid = cl_system_uuid=>create_uuid_c32_static( ).
+  CATCH cx_uuid_error.
+    RETURN.
+  ENDTRY.
+  MOVE-CORRESPONDING ls_guid TO cs_line.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD_OUTBOUND->SET_RESULT_STATUSES
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IT_SUCCESSFUL                  TYPE        GTT_TABIX
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+method SET_RESULT_STATUSES.
+
+endmethod.
+ENDCLASS.
