@@ -1,0 +1,53 @@
+class ZKB_CL_SERVICE_INBOUND definition
+  public
+  inheriting from ZKB_CL_SERVICE
+  create public .
+
+public section.
+
+  methods CONSTRUCTOR
+    importing
+      !IV_SERVICE_PATH type ZKBE_SERVICE_PATH default '' .
+protected section.
+
+  methods GET_DATA_FROM_JSON
+    redefinition .
+private section.
+ENDCLASS.
+
+
+
+CLASS ZKB_CL_SERVICE_INBOUND IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Public Method ZKB_CL_SERVICE_INBOUND->CONSTRUCTOR
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_SERVICE_PATH                TYPE        ZKBE_SERVICE_PATH (default ='')
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD CONSTRUCTOR.
+  super->constructor( ).
+
+  IF iv_service_path IS NOT INITIAL.
+    mv_path_service = iv_service_path.
+    mv_request_method = if_http_entity=>co_request_method_get.
+  ENDIF.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_SERVICE_INBOUND->GET_DATA_FROM_JSON
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_JSON_STRING                 TYPE        STRING
+* | [<-->] CREF_DATA                      TYPE REF TO DATA
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD GET_DATA_FROM_JSON.
+  FIELD-SYMBOLS:
+    <lv_string>    TYPE string.
+
+  CHECK cref_data IS BOUND.
+  ASSIGN cref_data->* TO <lv_string>.
+  CHECK sy-subrc EQ 0.
+  <lv_string> = iv_json_string.
+ENDMETHOD.
+ENDCLASS.
