@@ -1,0 +1,189 @@
+class ZKB_CL_RECORD definition
+  public
+  abstract
+  create public .
+
+public section.
+
+  constants:
+    BEGIN OF gc_statuses,
+        created     TYPE zkbe_ex_status VALUE 'N',
+        processed   TYPE zkbe_ex_status VALUE 'C',
+        errors      TYPE zkbe_ex_status VALUE 'E',
+      END OF gc_statuses .
+  data MS_INTERFACE type ZKB_INTERFACES read-only .
+
+  class-methods BUILD_BY_ID
+    importing
+      !IV_INTID type ZKBE_EX_INTID
+    returning
+      value(RO_INSTANCE) type ref to ZKB_CL_RECORD .
+protected section.
+
+  data MREF_DATA type ref to DATA .
+  class-data GT_FIELDS type ZKBT_GIS_TRANSFORMATION_TTY .
+
+  type-pools ABAP .
+  methods UPDATE_STATUS
+    importing
+      !IV_STATUS type ZKBE_EX_STATUS
+      !IV_KEYLINE type ZKBE_EX_GENERIC_KEY
+      !IV_COMMIT type ABAP_BOOL default ABAP_TRUE .
+  methods DEQUEUE_LINE
+    importing
+      !IV_KEYLINE type ZKBE_EX_GENERIC_KEY .
+  methods ENQUEUE_LINE
+    importing
+      !IV_KEYLINE type ZKBE_EX_GENERIC_KEY
+    returning
+      value(RV_SUCCESS) type ABAP_BOOL .
+  methods LOAD_FIELD_MAPPING .
+private section.
+ENDCLASS.
+
+
+
+CLASS ZKB_CL_RECORD IMPLEMENTATION.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Static Public Method ZKB_CL_RECORD=>BUILD_BY_ID
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_INTID                       TYPE        ZKBE_EX_INTID
+* | [<-()] RO_INSTANCE                    TYPE REF TO ZKB_CL_RECORD
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD BUILD_BY_ID.
+*---------------------------------------------------------------------*
+*Developer Name     : Ivan Stulkevich                                 *
+*Date of development: 16.01.2019                                      *
+*Short description  : Universal class for Kimble messages             *
+*Project/Ticket     : KIMBLE Integration                              *
+*---------------------------------------------------------------------*
+*Changes List                                                         *
+*-----------+----------+---------------------------------------+------*
+*Author Name|Date      |TR & Description                       | TAG  *
+*-----------+----------+---------------------------------------+------*
+*           |          |                                       |      *
+*-----------+----------+---------------------------------------+------*
+  DATA:
+    ls_interface   TYPE zkb_interfaces.
+
+  SELECT SINGLE *
+    FROM zkb_interfaces
+    INTO ls_interface
+    WHERE intid EQ iv_intid.
+  IF sy-subrc EQ 0 AND ls_interface-classname IS NOT INITIAL.
+    CREATE OBJECT ro_instance TYPE (ls_interface-classname).
+    IF ro_instance IS BOUND.
+      ro_instance->MS_INTERFACE = ls_interface.
+    ENDIF.
+  ENDIF.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD->DEQUEUE_LINE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_KEYLINE                     TYPE        ZKBE_EX_GENERIC_KEY
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+method DEQUEUE_LINE.
+endmethod.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD->ENQUEUE_LINE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_KEYLINE                     TYPE        ZKBE_EX_GENERIC_KEY
+* | [<-()] RV_SUCCESS                     TYPE        ABAP_BOOL
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD ENQUEUE_LINE.
+  rv_success = abap_true.
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD->LOAD_FIELD_MAPPING
+* +-------------------------------------------------------------------------------------------------+
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD load_field_mapping.
+  DATA:
+    lt_fields_int    TYPE TABLE OF zkb_fields,
+    lt_fields_all    TYPE TABLE OF zkb_fields.
+  FIELD-SYMBOLS:
+    <ls_field_db>    TYPE zkb_fields,
+    <ls_field_int>   TYPE zkb_fields,
+    <ls_field>       TYPE zkbs_transformation_sty.
+
+  REFRESH gt_fields.
+  SELECT *
+    FROM zkb_fields
+    INTO TABLE lt_fields_int
+    WHERE intid EQ ms_interface-intid.
+  SELECT *
+    FROM zkb_fields
+    INTO TABLE lt_fields_all
+    WHERE intid EQ ''.
+
+  LOOP AT lt_fields_int ASSIGNING <ls_field_db>.
+    APPEND INITIAL LINE TO gt_fields ASSIGNING <ls_field>.
+    MOVE-CORRESPONDING <ls_field_db> TO <ls_field>.
+  ENDLOOP.
+  LOOP AT lt_fields_all ASSIGNING <ls_field_db>.
+    READ TABLE lt_fields_int ASSIGNING <ls_field_int> WITH KEY comp_path = <ls_field_db>-comp_path.
+    CHECK sy-subrc NE 0.
+    APPEND INITIAL LINE TO gt_fields ASSIGNING <ls_field>.
+    MOVE-CORRESPONDING <ls_field_db> TO <ls_field>.
+  ENDLOOP.
+
+ENDMETHOD.
+
+
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Instance Protected Method ZKB_CL_RECORD->UPDATE_STATUS
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IV_STATUS                      TYPE        ZKBE_EX_STATUS
+* | [--->] IV_KEYLINE                     TYPE        ZKBE_EX_GENERIC_KEY
+* | [--->] IV_COMMIT                      TYPE        ABAP_BOOL (default =ABAP_TRUE)
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+METHOD update_status.
+  DATA:
+    ls_line TYPE zkb_exchange.
+
+  "TODO: Change to universal read (depending on key)
+
+  SELECT SINGLE *
+    FROM zkb_exchange
+    INTO ls_line
+    WHERE intid     EQ ms_interface-intid
+      AND keyline   EQ iv_keyline.
+  IF sy-subrc NE 0.
+    ls_line-intid   = ms_interface-intid.
+    ls_line-keyline = iv_keyline.
+    ls_line-crdat   = sy-datum.
+    ls_line-crtim   = sy-uzeit.
+    ls_line-crnam   = sy-uname.
+    ls_line-aedat   = ls_line-crdat.
+    ls_line-aetim   = ls_line-crtim.
+    ls_line-aenam   = ls_line-crnam.
+  ELSE.
+    ls_line-aedat   = sy-datum.
+    ls_line-aetim   = sy-uzeit.
+    ls_line-aenam   = sy-uname.
+  ENDIF.
+  ls_line-status = iv_status.
+
+  IF ls_line-status EQ gc_statuses-created.
+    CLEAR ls_line-send_guid.
+  ENDIF.
+
+  MODIFY zkb_exchange FROM ls_line.
+  LOG-POINT ID zkb_check FIELDS sy-subrc.
+  IF iv_commit EQ abap_true.
+    IF sy-subrc EQ 0.
+      COMMIT WORK.
+    ELSE.
+      ROLLBACK WORK.
+    ENDIF.
+  ENDIF.
+ENDMETHOD.
+ENDCLASS.
