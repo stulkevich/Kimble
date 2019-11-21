@@ -1,0 +1,29 @@
+*&--------------------------------------------------------------------*
+*& Report  ZKB_RESPONSE_PROCESS
+*---------------------------------------------------------------------*
+*Developer Name     : Ivan Stulkevich                                 *
+*Date of development: 09.04.2019                                      *
+*Short description  : Process Kimble Responses                        *
+*Project/Ticket     : KIMBLE Integration                              *
+*---------------------------------------------------------------------*
+*Changes List                                                         *
+*-----------+----------+---------------------------------------+------*
+*Author Name|Date      |TR & Description                       | TAG  *
+*-----------+----------+---------------------------------------+------*
+*           |          |                                       |      *
+*-----------+----------+---------------------------------------+------*
+REPORT  zkb_response_process.
+
+INCLUDE ZKB_RESPONSE_PROCESS_C01.
+INCLUDE ZKB_RESPONSE_PROCESS_TOP.
+INCLUDE ZKB_RESPONSE_PROCESS_S01.
+
+START-OF-SELECTION.
+  INCLUDE zbc_zwrw_update.
+  CREATE OBJECT go_report.
+  go_report->set_parameters(
+    EXPORTING
+      ir_key = s_key[] ).
+  go_report->process_data( ).
+  commit WORK.
+  FREE go_report.
